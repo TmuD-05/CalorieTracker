@@ -1,38 +1,49 @@
 # api/services.py
 import os
 from google import genai
-from google.genai import types  # 1. Import 'types' from the new SDK
+from google.genai import types
 from dotenv import load_dotenv
+from .schemas import MealAnalysis
 
 # Load the API key from the .env file
 load_dotenv()
 
 # Initialize the client explicitly
-client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
-def analyze_food_image(image_bytes: bytes, mime_type: str) -> str:
+def analyze_food_image(image_bytes: bytes, mime_type: str) -> MealAnalysis:
     """
-    Sends an image to Gemini 3.6 Flash and asks for a nutritional breakdown.
+    Sends an image to Gemini Flash and asks for a structured nutritional breakdown.
+    Guarantees valid JSON conforming to the MealAnalysis schema.
     """
     prompt = """
-    Analyze this image of food. 
-    Identify the food items, estimate the portion size in grams, and provide an 
-    estimated calorie count and macronutrient breakdown (protein, carbs, fat).
-    Return the result STRICTLY as a JSON object with keys: 
-    'food_items' (list), 'total_calories' (int), 'protein_g' (int), 'carbs_g' (int), 'fat_g' (int).
-    Do not include markdown blocks or any other text.
+    Analyze this image of food.
+    1. Identify all distinct food items on the plate.
+    2. Estimate the portion size of each item in grams.
+    3. Calculate the calories and macronutrients (protein, carbs, fat, fiber) for each item and the entire plate.
     """
 
-    # 2. Use types.Part.from_bytes() instead of a standard dictionary
+    # Create image part from byte stream
     image_part = types.Part.from_bytes(
         data=image_bytes,
         mime_type=mime_type,
     )
 
-    # Call the Gemini model
+    # Use GEMINI_MODEL from .env if defined, otherwise default to gemini-2.5-flash
+    model_name = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
+
+    # Call the Gemini model with structured output configuration
     response = client.models.generate_content(
-        model='gemini-3.6-flash',
-        contents=[prompt, image_part]
+        model=model_name,
+        contents=[prompt, image_part],
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=MealAnalysis,
+            temperature=0.2,  # Low temperature for factual, consistent estimates
+        ),
     )
 
-    return response.text
+    # The SDK parses directly into the Pydantic schema when response_schema is provided
+    if getattr(response, "parsed", None):
+        return response.parsed
+    return MealAnalysis.model_validate_json(response.text)
