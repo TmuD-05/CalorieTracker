@@ -26,27 +26,24 @@ def analyze_food_image(image_bytes: bytes, mime_type: str) -> MealAnalysis:
     3. Calculate the calories and macronutrients (protein, carbs, fat, fiber) for each item and the entire plate.
     """
 
-    # Create image part from byte stream
     image_part = types.Part.from_bytes(
         data=image_bytes,
         mime_type=mime_type,
     )
-
-    # Use GEMINI_MODEL from .env if defined, otherwise default to gemini-2.5-flash
     model_name = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
 
-    # Call the Gemini model with structured output configuration
+
     response = client.models.generate_content(
         model=model_name,
         contents=[prompt, image_part],
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=MealAnalysis,
-            temperature=0.2,  # Low temperature for factual, consistent estimates
+            temperature=0.2,
         ),
     )
 
-    # The SDK parses directly into the Pydantic schema when response_schema is provided
+
     if getattr(response, "parsed", None):
         return response.parsed
     return MealAnalysis.model_validate_json(response.text)
@@ -83,3 +80,34 @@ def get_macronutrients_by_barcode(barcode: str) -> Optional[BarcodeProduct]:
 
     # Let Pydantic do the extraction, normalization, and object instantiation
     return BarcodeProduct.from_open_food_facts(clean_barcode, raw_json)
+
+
+def process_recipe(text: str) -> MealAnalysis:
+    """
+    Analyzes an unstructured recipe, list of ingredients, or meal description.
+    Extracts individual food items, estimates portion weights, and calculates macros/calories.
+    """
+    model = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
+    prompt = """
+    Analyze the following list of ingredients or meal description:
+    1. Identify all distinct food items and ingredients.
+    2. Estimate the portion weight in grams for each item.
+    3. Calculate the calories and macronutrients (protein, carbs, fat, fiber) for each item and the entire meal.
+    """
+    response = client.models.generate_content(
+        model=model,
+        contents=[prompt, text],
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=MealAnalysis,
+            temperature=0.2,
+        ),
+    )
+
+    if getattr(response, "parsed", None):
+        return response.parsed
+    return MealAnalysis.model_validate_json(response.text)
+
+
+# Backward-compatible alias
+process_reciepts = process_recipe
