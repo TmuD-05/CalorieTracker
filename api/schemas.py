@@ -77,3 +77,11 @@ class BarcodeProduct(BaseModel):
                 fiber_g=fiber,
             ),
         )
+
+
+class RecipeInput(BaseModel):
+    ingredients: str = Field(
+        ...,
+        description="Text description of ingredients or meal (e.g. '200g of rice and 200g of beef')",
+        example="200g of beef and 150g of white rice"
+    )
