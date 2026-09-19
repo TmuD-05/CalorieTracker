@@ -10,8 +10,16 @@ from .schemas import MealAnalysis, BarcodeProduct
 # Load the API key from the .env file
 load_dotenv()
 
-# Initialize the client explicitly
-client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+
+def get_genai_client() -> genai.Client:
+    """
+    Returns an initialized genai.Client instance.
+    Raises ValueError if GEMINI_API_KEY is not configured.
+    """
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY environment variable is missing. Please set it in .env.")
+    return genai.Client(api_key=api_key)
 
 
 def analyze_food_image(image_bytes: bytes, mime_type: str) -> MealAnalysis:
@@ -26,12 +34,12 @@ def analyze_food_image(image_bytes: bytes, mime_type: str) -> MealAnalysis:
     3. Calculate the calories and macronutrients (protein, carbs, fat, fiber) for each item and the entire plate.
     """
 
+    client = get_genai_client()
     image_part = types.Part.from_bytes(
         data=image_bytes,
         mime_type=mime_type,
     )
     model_name = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
-
 
     response = client.models.generate_content(
         model=model_name,
@@ -42,7 +50,6 @@ def analyze_food_image(image_bytes: bytes, mime_type: str) -> MealAnalysis:
             temperature=0.2,
         ),
     )
-
 
     if getattr(response, "parsed", None):
         return response.parsed
@@ -87,6 +94,7 @@ def process_recipe(text: str) -> MealAnalysis:
     Analyzes an unstructured recipe, list of ingredients, or meal description.
     Extracts individual food items, estimates portion weights, and calculates macros/calories.
     """
+    client = get_genai_client()
     model = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
     prompt = """
     Analyze the following list of ingredients or meal description:
