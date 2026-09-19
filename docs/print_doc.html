@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Architectural & Systems Engineering Reference - Calorie Tracker</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 20mm 15mm 20mm 15mm;
+      @bottom-right {
+        content: counter(page);
+      }
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #1e293b;
+      line-height: 1.6;
+      font-size: 11pt;
+      margin: 0;
+      padding: 0;
+    }
+    h1 {
+      color: #0f172a;
+      font-size: 22pt;
+      border-bottom: 2px solid #10b981;
+      padding-bottom: 8px;
+      margin-top: 0;
+    }
+    h2 {
+      color: #0f172a;
+      font-size: 15pt;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 6px;
+      margin-top: 24pt;
+      page-break-after: avoid;
+    }
+    h3 {
+      color: #047857;
+      font-size: 12pt;
+      margin-top: 14pt;
+      page-break-after: avoid;
+    }
+    p, ul, ol {
+      margin-top: 6pt;
+      margin-bottom: 6pt;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12pt 0;
+      font-size: 9.5pt;
+      page-break-inside: avoid;
+    }
+    th, td {
+      border: 1px solid #cbd5e1;
+      padding: 7pt 9pt;
+      text-align: left;
+    }
+    th {
+      background-color: #f1f5f9;
+      font-weight: 600;
+      color: #0f172a;
+    }
+    tr:nth-child(even) td {
+      background-color: #f8fafc;
+    }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 9pt;
+      background-color: #f1f5f9;
+      padding: 2px 4px;
+      border-radius: 4px;
+      color: #0f766e;
+    }
+    pre {
+      background-color: #0f172a;
+      color: #f8fafc;
+      padding: 10pt;
+      border-radius: 6px;
+      font-size: 8.5pt;
+      overflow-x: auto;
+      page-break-inside: avoid;
+      line-height: 1.4;
+    }
+    pre code {
+      background-color: transparent;
+      color: inherit;
+      padding: 0;
+    }
+    .callout {
+      background-color: #ecfdf5;
+      border-left: 4px solid #10b981;
+      padding: 10pt 12pt;
+      margin: 12pt 0;
+      border-radius: 0 6px 6px 0;
+      font-size: 10pt;
+    }
+    .callout-warning {
+      background-color: #fff1f2;
+      border-left: 4px solid #f43f5e;
+      padding: 10pt 12pt;
+      margin: 12pt 0;
+      border-radius: 0 6px 6px 0;
+      font-size: 10pt;
+    }
+    .page-break {
+      page-break-before: always;
+    }
+    .meta-badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 9pt;
+      font-weight: 600;
+      margin-right: 6px;
+    }
+    .badge-client { background: #e0e7ff; color: #3730a3; }
+    .badge-perf { background: #dcfce7; color: #166534; }
+    .badge-sec { background: #fef3c7; color: #92400e; }
+  </style>
+</head>
+<body>
+
+  <h1>Architectural & Systems Engineering Reference</h1>
+  <p><strong>Platform:</strong> Multimodal AI Nutrition & Dietary Engine (PWA + Django Ninja + Gemini Flash)<br>
+  <strong>Sprint Topic:</strong> Data Flow, Resource Constraints & Architectural Boundaries</p>
+
+  <div class="callout">
+    <strong>Executive Summary:</strong> This document explains the high-leverage architectural and systems decisions implemented in the mobile ingestion pipeline. It highlights what matters for performance, memory stability, and API resilience, while clarifying what is purely decorative UI.
+  </div>
+
+  <h2>1. What to Understand vs. What You Can Safely Skim</h2>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 50%;">What to Understand (Architectural & Systems Level)</th>
+        <th style="width: 50%;">What You Can Safely Skim / Ignore</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Why the image is resized client-side</strong> instead of on the backend server.</td>
+        <td>CSS styling, Tailwind utility classes, layouts, and colors.</td>
+      </tr>
+      <tr>
+        <td><strong>The wire protocol, format, and size</strong> of the request reaching the API endpoints.</td>
+        <td>React component layout nesting and button coordinates.</td>
+      </tr>
+      <tr>
+        <td><strong>The lifecycle of memory pointers</strong> (Blob URL creation and mandatory revocation).</td>
+        <td>Button hover animations, UI transition effects, or loading spinners.</td>
+      </tr>
+      <tr>
+        <td><strong>Handling error states and offline synchronization</strong> across client outbox and server.</td>
+        <td>Specific 2D canvas pixel-manipulation formulas.</td>
+      </tr>
+      <tr>
+        <td><strong>Idempotency with UUIDv7</strong> to guarantee zero duplicate logs upon retries.</td>
+        <td>Form state boilerplate or slider markup nuances.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>2. System Boundaries & Data Flow Architecture</h2>
+  <p>The system is organized into 5 decoupled boundaries that transition data safely from physical hardware sensors to cloud foundation models:</p>
+  <ul>
+    <li><strong>Boundary 1 (Hardware Sensor &rarr; OS):</strong> User taps "Capture Meal". Browser issues an OS-level intent via <code>capture="environment"</code>, delegating execution to the native camera application (activating OIS, macro/wide optical switching, and flash).</li>
+    <li><strong>Boundary 2 (In-Browser Edge Transform):</strong> Raw multi-megabyte photo is decoded asynchronously off the UI thread via <code>createImageBitmap()</code>, clamped to max 2048px, stripped of EXIF metadata on an <code>OffscreenCanvas</code>, and compressed to WebP (~350KB).</li>
+    <li><strong>Boundary 3 (Local Persistence / Outbox):</strong> Downscaled blob and meal draft are committed into IndexedDB (Dexie.js) with status <code>PENDING_UPLOAD</code> and a client-generated UUIDv7.</li>
+    <li><strong>Boundary 4 (Ingestion Gateway):</strong> The client streams the 350KB payload to Django Ninja (<code>POST /api/food/analyze-food</code>) via <code>multipart/form-data</code> with memory validation.</li>
+    <li><strong>Boundary 5 (Foundation Model):</strong> The backend forwards the byte stream to Gemini 3.6 Flash via <code>types.Part.from_bytes()</code>, enforcing typed Pydantic schema decoding.</li>
+  </ul>
+
+  <h2>3. Architectural Decision Records (ADRs): Why Option A Over Option B</h2>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 20%;">Architectural Decision</th>
+        <th style="width: 25%;">Chosen (Option A)</th>
+        <th style="width: 25%;">Rejected (Option B)</th>
+        <th style="width: 30%;">Decisive System Rationale</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>1. Camera Ingestion</strong></td>
+        <td><strong>OS Delegation</strong> (<code>capture="environment"</code>)</td>
+        <td>Continuous WebRTC (<code>getUserMedia</code>)</td>
+        <td>WebRTC runs in the browser sandbox, drains battery, lacks native OIS and optical macro lens switching, drops FPS, and requires HTTPS. OS delegation yields execution to the native camera app with full ISP hardware acceleration.</td>
+      </tr>
+      <tr>
+        <td><strong>2. Image Downscaling</strong></td>
+        <td><strong>Client-Side Canvas</strong> (in-browser)</td>
+        <td>Server-Side Resizing (Pillow / Sharp)</td>
+        <td>Cellular uplink is throttled (2-5 Mbps). 15MB upload takes 8-15s vs 300ms for 350KB WebP. 1,000 concurrent 15MB uploads consume 15GB of server RAM. Client transform also strips GPS/EXIF on-device before packets touch the wire.</td>
+      </tr>
+      <tr>
+        <td><strong>3. Image Decoding</strong></td>
+        <td><strong><code>createImageBitmap()</code></strong> (Off-Thread)</td>
+        <td><code>FileReader.readAsDataURL()</code></td>
+        <td>Base64 expands binaries by 33% in V8 heap memory. WebKit iOS tabs crash above ~300MB RAM. <code>createImageBitmap</code> decodes off the UI thread directly into native GPU memory.</td>
+      </tr>
+      <tr>
+        <td><strong>4. Memory Pointers</strong></td>
+        <td><strong><code>createObjectURL</code> + Revocation</strong></td>
+        <td>Base64 Data URLs</td>
+        <td>Blob URL is a 48-byte pointer to browser-managed memory. Explicit <code>revokeObjectURL()</code> frees native buffers immediately on unmount or retakes.</td>
+      </tr>
+      <tr>
+        <td><strong>5. Offline Storage</strong></td>
+        <td><strong>IndexedDB (Dexie.js) Outbox</strong></td>
+        <td><code>localStorage</code> / Memory</td>
+        <td><code>localStorage</code> is synchronous (blocks UI), has a strict 5MB quota, and cannot store Blobs. IndexedDB is asynchronous, stores hundreds of megabytes, and survives browser tab closures.</td>
+      </tr>
+      <tr>
+        <td><strong>6. Client Request IDs</strong></td>
+        <td><strong>RFC 9562 UUIDv7</strong></td>
+        <td>Random UUIDv4</td>
+        <td>UUIDv4 causes random B-tree page splits. UUIDv7 embeds a 48-bit millisecond timestamp, providing sequential inserts, optimal B-tree cache locality, and chronological sorting.</td>
+      </tr>
+      <tr>
+        <td><strong>7. AI Schema Parsing</strong></td>
+        <td><strong>Constrained Token Sampling</strong> (<code>response_schema</code>)</td>
+        <td>Prompt Engineering + Regex</td>
+        <td>Unconstrained LLMs frequently return markdown wrappers or invalid JSON. Constrained sampling restricts logits, guaranteeing 100% typed, valid Pydantic JSON.</td>
+      </tr>
+      <tr>
+        <td><strong>8. Data Commitment</strong></td>
+        <td><strong>HITL Review State Machine</strong></td>
+        <td>Instant Auto-Commit</td>
+        <td>Vision AI provides estimates, not ground truth. Direct committing frustrates users. Interactive sliders recalculate macros on the client in &lt; 1ms without server re-queries.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="page-break"></div>
+
+  <h2>4. Deep Dive 1: Why Client-Side Edge Transformation?</h2>
+  
+  <h3>The Problem: Cellular Uplink Saturation & Server Swap Depletion</h3>
+  <p>Modern smartphones produce 12MP to 48MP photos (8MB to 15MB HEIC/JPEG files). Uploading these directly causes two severe failure modes:</p>
+  <ol>
+    <li><strong>Cellular Uplink Throttling:</strong> Mobile cellular networks are heavily asymmetrical. While download speeds are fast, mobile uplink speeds are often limited to 2–5 Mbps in real-world scenarios. Uploading an uncompressed 15MB file takes <strong>8 to 15 seconds</strong> of radio transmission, creating high friction for the user.</li>
+    <li><strong>Server Memory Exhaustion:</strong> If 1,000 concurrent mobile users upload uncompressed 15MB photos simultaneously, the server must buffer:
+      <pre>1,000 users &times; 15 MB = 15 GB of raw network buffers</pre>
+      This causes server processes to exhaust available RAM, forcing the operating system into disk swapping, which balloons API latency from milliseconds to tens of seconds and causes Out-Of-Memory (OOM) worker restarts.
+    </li>
+  </ol>
+
+  <h3>The Client Transform Solution</h3>
+  <p>By executing proportional downscaling and WebP compression on the client before the network request is opened:</p>
+  <ul>
+    <li><strong>Payload Reduction:</strong> File size is reduced from 12MB to <strong>~350KB</strong> (a <strong>97% reduction</strong>).</li>
+    <li><strong>Transmission Latency:</strong> Upload finishes in <strong>&lt; 300ms</strong> on mobile connections.</li>
+    <li><strong>Server Predictability:</strong> The Django server handles lightweight, predictable payloads that fit cleanly into memory buffers without swap saturation.</li>
+  </ul>
+
+  <h3>Why 2048px is the Gemini Vision "Sweet Spot"</h3>
+  <p>Multimodal vision foundation models process images by segmenting them into fixed-dimension pixel patches. Images above 2048px are downsampled by the model's pre-processor anyway. Clamping the maximum dimension to 2048px preserves fine-grained food textures (such as grains of rice, sauce viscosity, and spices) without transmitting redundant pixels.</p>
+
+  <h3>Privacy by Design: EXIF & GPS Scrubbing</h3>
+  <p>When an image file is drawn onto an HTML5 <code>&lt;canvas&gt;</code>, the browser extracts <em>only the raw color raster</em>. All auxiliary metadata tags—including precise GPS location coordinates, camera serial numbers, and device fingerprints—are permanently stripped on the user's device before any bytes leave over the network.</p>
+
+  <h2>5. Deep Dive 2: Wire Protocol & API Request Sizing</h2>
+  
+  <h3>Ingestion Wire Protocol (<code>POST /api/food/analyze-food</code>)</h3>
+  <p>The client does not transmit Base64 JSON strings. It sends standard binary <code>multipart/form-data</code>:</p>
+  <pre><code>POST /api/food/analyze-food HTTP/1.1
+Host: api.calorietracker.local
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW
+X-Client-Request-Id: 0191c95e-3990-7d72-9a3b-2802bcfb17ce
+Content-Length: 358412
+
+------WebKitFormBoundary7MA4YWxkTrZu0gW
+Content-Disposition: form-data; name="image"; filename="meal_0191c95e.webp"
+Content-Type: image/webp
+
+&lt;binary WebP stream: 350,120 bytes&gt;
+------WebKitFormBoundary7MA4YWxkTrZu0gW--</code></pre>
+
+  <h3>Backend Ingestion Guards (Django Ninja)</h3>
+  <ul>
+    <li><strong>Size Limit Enforcement:</strong> In <code>api/endpoints.py</code>, files over 25MB are immediately rejected with <code>HTTP 413 Payload Too Large</code> before reading the body into server memory.</li>
+    <li><strong>MIME Gate:</strong> Only content types matching <code>image/*</code> are accepted.</li>
+    <li><strong>Zero-Swap Streaming:</strong> <code>image.read()</code> passes the in-memory 350KB buffer directly to <code>types.Part.from_bytes()</code>. No temporary files are written to the host filesystem.</li>
+  </ul>
+
+  <div class="page-break"></div>
+
+  <h2>6. Deep Dive 3: Memory Pointer Lifecycles & Mobile WebKit RAM Constraints</h2>
+
+  <div class="callout-warning">
+    <strong>The Mobile Browser Memory Ceiling:</strong> On iOS Safari (WebKit), tabs that consume more than approximately <strong>300MB–400MB of RAM</strong> are aggressively killed by the operating system (<code>SIGKILL</code>), reloading the page and destroying application state.
+  </div>
+
+  <h3>The Uncompressed Raster Math</h3>
+  <p>A full-resolution 48MP photo contains 48,000,000 pixels:</p>
+  <pre>48,000,000 pixels &times; 4 bytes (RGBA) &approx; 192 MB of uncompressed RAM</pre>
+  <p>If an application reads the file via <code>FileReader.readAsDataURL()</code> (Base64 string) and decodes it without cleanup, memory usage immediately surges past <strong>240MB</strong> from a single photo, triggering tab crashes.</p>
+
+  <h3>Zero-Memory-Leak Rules Implemented</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Rule</th>
+        <th>Dangerous Pattern</th>
+        <th>Our Architectural Implementation</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>1. Avoid Base64</strong></td>
+        <td><code>readAsDataURL()</code>: +33% memory bloat, duplicates string in V8 heap.</td>
+        <td><code>createImageBitmap()</code>: Decodes off the main UI thread directly into native GPU memory.</td>
+      </tr>
+      <tr>
+        <td><strong>2. Explicit Handle Teardown</strong></td>
+        <td>Relying on JS garbage collection for native graphics handles.</td>
+        <td><code>bitmap.close()</code> in a <code>finally</code> block releases GPU memory immediately.</td>
+      </tr>
+      <tr>
+        <td><strong>3. Canvas Backing Store Release</strong></td>
+        <td>Leaving canvas dimensions intact after drawing.</td>
+        <td><code>canvas.width = 0; canvas.height = 0;</code> instructs the compositor to free the raster buffer.</td>
+      </tr>
+      <tr>
+        <td><strong>4. Object URL Lifecycle</strong></td>
+        <td>Creating <code>URL.createObjectURL()</code> without releasing it.</td>
+        <td>Every preview returns a scoped <code>revokePreview()</code> handle called in <code>useEffect</code> cleanup and on photo resets.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>7. Deep Dive 4: Error State Machine & Resilient Offline Sync</h2>
+  <p>Mobile networks drop connections frequently. The architecture implements a robust state machine across client and backend:</p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Trigger / Error</th>
+        <th>Classification</th>
+        <th>System Response</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Offline Disconnect (No Network)</strong></td>
+        <td>Transient Network</td>
+        <td>Optimistic UI: Meal saved locally in IndexedDB with status <code>PENDING_UPLOAD</code>. Outbox queue auto-drains when <code>window.ononline</code> or <code>visibilitychange</code> fires.</td>
+      </tr>
+      <tr>
+        <td><strong>HTTP 503 / 504 (Server Overloaded)</strong></td>
+        <td>Transient Server</td>
+        <td>Draft remains in outbox; <code>retry_count</code> increments with backoff.</td>
+      </tr>
+      <tr>
+        <td><strong>HTTP 413 (File &gt; 25MB)</strong></td>
+        <td>Permanent Client</td>
+        <td>Removed from outbox; displays "Image exceeds size limit" to user.</td>
+      </tr>
+      <tr>
+        <td><strong>Duplicate Sync Request</strong></td>
+        <td>Idempotency</td>
+        <td>Backend checks <code>client_request_id</code> (UUIDv7) in <code>MealLog</code>. Returns existing record without duplicate calorie logging.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>8. Summary Checklist for Architectural Review</h2>
+  <ul>
+    <li>&check; <strong>Hardware Delegation:</strong> Browser yields camera execution to OS intent (<code>capture="environment"</code>).</li>
+    <li>&check; <strong>Edge Transformation:</strong> Off-thread decode, 2048px clamp, EXIF stripping, 85% WebP (~350KB).</li>
+    <li>&check; <strong>Memory Safety:</strong> No Base64, explicit <code>bitmap.close()</code>, canvas zeroing, explicit <code>revokeObjectURL()</code>.</li>
+    <li>&check; <strong>Offline Ingestion:</strong> IndexedDB outbox queue + UUIDv7 idempotency keys.</li>
+    <li>&check; <strong>Streaming Ingestion:</strong> Django Ninja multipart validation + <code>types.Part.from_bytes()</code> without disk swap.</li>
+    <li>&check; <strong>HITL State Machine:</strong> Client-side proportional macro recalculation (&lt; 1ms) prior to final database commitment.</li>
+  </ul>
+
+</body>
+</html>

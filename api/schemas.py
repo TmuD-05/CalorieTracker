@@ -85,3 +85,25 @@ class RecipeInput(BaseModel):
         description="Text description of ingredients or meal (e.g. '200g of rice and 200g of beef')",
         example="200g of beef and 150g of white rice"
     )
+
+
+class MealLogCreate(BaseModel):
+    client_request_id: str = Field(description="UUIDv7 client request ID for idempotency")
+    meal_name: str = Field(description="Name or description of meal")
+    meal_type: str = Field(default="LUNCH", description="BREAKFAST, LUNCH, DINNER, or SNACK")
+    consumed_at: Optional[str] = Field(default=None, description="ISO-8601 timestamp")
+    total_calories: int = Field(description="Total calories in kcal")
+    total_macros: MacroNutrients = Field(description="Total macronutrient breakdown")
+    food_items: List[FoodItem] = Field(default_factory=list, description="Itemized food components")
+
+
+class MealLogResponse(BaseModel):
+    id: int
+    client_request_id: str
+    meal_name: str
+    meal_type: str
+    consumed_at: str
+    total_calories: int
+    total_macros: MacroNutrients
+    food_items: List[FoodItem]
+
